@@ -25,48 +25,59 @@ type PatchItem struct {
 	IsActive *bool `json:"isActive"`
 }
 
-var now time.Time = time.Now()
+type CurrentTime func() time.Time
 
-var items = []Item {
-	{ID: 1, Title: "Bouldering", Description: "Go to Vertical Endeavors and try bouldering.", CreatedDate: now},
-	{ID: 2, Title: "LeBurger", Description: "Have a meal at LeBurger.", CreatedDate: now},
-	{ID: 3, Title: "Symphony", Description: "See a show at the Minneapolis Symphony.", CreatedDate: now},
+type Handlers struct {
+        currTime CurrentTime
 }
 
-func createRouter() *gin.Engine {
+var now time.Time = time.Now().UTC()
+
+var items = []Item {
+        {ID: 1, Title: "Bouldering", Description: "Go to Vertical Endeavors and try bouldering.", IsActive: true, CreatedDate: now},
+        {ID: 2, Title: "LeBurger", Description: "Have a meal at LeBurger.", IsActive: true, CreatedDate: now},
+        {ID: 3, Title: "Symphony", Description: "See a show at the Minneapolis Symphony.", IsActive: true, CreatedDate: now},
+}
+
+func createRouter(handlers Handlers) *gin.Engine {
         r := gin.Default()
 
-        r.GET("/items", getItems)
-        r.POST("/items", createItem)
-        r.PUT("/items/:id", updateItem)
-        r.PATCH("/items/:id", patchItem)
-        r.DELETE("/items/:id", deleteItem)
+        r.GET("/items", handlers.getItems)
+        r.POST("/items", handlers.createItem)
+        r.PUT("/items/:id", handlers.updateItem)
+        r.PATCH("/items/:id", handlers.patchItem)
+        r.DELETE("/items/:id", handlers.deleteItem)
 
         return r
 }
 
 func main() {
-        r := createRouter()
+        h := Handlers{
+                currTime: func() time.Time {
+                        return time.Now().UTC()
+                },
+        } 
+        r := createRouter(h)
         r.Run()
 }
 
-func getItems(c *gin.Context) {
+func (h *Handlers) getItems(c *gin.Context) {
         c.JSON(http.StatusOK, items)
 }
 
-func createItem(c *gin.Context) {
+func (h *Handlers) createItem(c *gin.Context) {
         var newItem Item
         if err := c.ShouldBindJSON(&newItem); err != nil {
                 c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
                 return
         }
         newItem.ID = len(items) + 1
-        newItem.CreatedDate = time.Now()
+        newItem.CreatedDate = h.currTime()
         items = append(items, newItem)
         c.JSON(http.StatusCreated, newItem)
 }
 
-func updateItem(c *gin.Context) {
+func (h *Handlers) updateItem(c *gin.Context) {
         idStr := c.Param("id")
         id, err := strconv.Atoi(idStr)
         if err != nil {
@@ -84,7 +95,7 @@ func updateItem(c *gin.Context) {
                 if item.ID == id {
                         items[i].Title = updatedItem.Title
                         items[i].Description = updatedItem.Description
-                        items[i].ModifiedDate = time.Now()
+                        items[i].ModifiedDate = h.currTime()
                         items[i].IsActive = updatedItem.IsActive
                         c.JSON(http.StatusOK, items[i])
                         return
@@ -93,7 +104,7 @@ func updateItem(c *gin.Context) {
         c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
 }
 
-func patchItem(c *gin.Context) {
+func (h *Handlers) patchItem(c *gin.Context) {
         idStr := c.Param("id")
         id, err := strconv.Atoi(idStr)
         if err != nil {
@@ -132,7 +143,7 @@ func patchItem(c *gin.Context) {
                 item.Description = *patchData.Description
         }
 
-        item.ModifiedDate = time.Now()
+        item.ModifiedDate = h.currTime()
 
         if patchData.CompletedDate != nil {
                 item.CompletedDate = *patchData.CompletedDate
@@ -145,7 +156,7 @@ func patchItem(c *gin.Context) {
         c.JSON(http.StatusOK, item)
 }
 
-func deleteItem(c *gin.Context) {
+func (h *Handlers) deleteItem(c *gin.Context) {
         idStr := c.Param("id")
         id, err := strconv.Atoi(idStr)
         if err != nil {

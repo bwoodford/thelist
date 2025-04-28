@@ -1,7 +1,9 @@
 package main
 
 import (
+	"database/sql"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -9,167 +11,261 @@ import (
 )
 
 type Item struct {
-	ID int `json:"id"`
-	Title string `json:"title"`
-        Description string `json:"description" `
-	CreatedDate time.Time `json:"createdDate"`
-	ModifiedDate time.Time `json:"modifiedDate"`
-        CompletedDate time.Time `json:"completedDate"`
-	IsActive bool `json:"isActive"`
+	ID            int        `json:"id"`
+	Title         string     `json:"title"`
+	Description   string     `json:"description" `
+	CreatedDate   time.Time  `json:"createdDate"`
+	ModifiedDate  *time.Time `json:"modifiedDate"`
+	CompletedDate *time.Time `json:"completedDate"`
+	IsActive      bool       `json:"isActive"`
+}
+
+func (i *Item) Equals(o *Item) bool {
+
+	timePointersEqual := func(t1 *time.Time, t2 *time.Time) bool {
+		if t1 == nil && t2 == nil {
+			return true
+		}
+		if t1 != nil && t2 == nil {
+			return false
+		}
+		if t1 == nil && t2 != nil {
+			return false
+		}
+		if !(*t1).Equal(*t2) {
+			return false
+		}
+		return true
+	}
+
+	if i.ID != o.ID {
+		return false
+	}
+
+	if i.Title != o.Title {
+		return false
+	}
+
+	if i.Description != o.Description {
+		return false
+	}
+
+	if i.IsActive != o.IsActive {
+		return false
+	}
+
+	if !i.CreatedDate.Equal(o.CreatedDate) {
+		return false
+	}
+
+	if !timePointersEqual(i.ModifiedDate, o.ModifiedDate) {
+		return false
+	}
+
+	if !timePointersEqual(i.CompletedDate, o.CompletedDate) {
+		return false
+	}
+
+	return true
+}
+
+type PutItem struct {
+	Title         string     `json:"title"`
+	Description   string     `json:"description" `
+	CompletedDate *time.Time `json:"completedDate"`
+	IsActive      bool       `json:"isActive"`
 }
 
 type PatchItem struct {
-	Title *string `json:"title"`
-        Description *string `json:"description" `
-        CompletedDate *time.Time `json:"completedDate"`
-	IsActive *bool `json:"isActive"`
+	Title         *string    `json:"title"`
+	Description   *string    `json:"description" `
+	CompletedDate *time.Time `json:"completedDate"`
+	IsActive      *bool      `json:"isActive"`
 }
 
-type CurrentTime func() time.Time
+func (m *PatchItem) HasChanges() bool {
+	if m.Title != nil {
+		return true
+	}
+
+	if m.Description != nil {
+		return true
+	}
+
+	if m.CompletedDate != nil {
+		return true
+	}
+
+	if m.IsActive != nil {
+		return true
+	}
+
+	return false
+}
 
 type Handlers struct {
-        currTime CurrentTime
-}
-
-var now time.Time = time.Now().UTC()
-
-var items = []Item {
-        {ID: 1, Title: "Bouldering", Description: "Go to Vertical Endeavors and try bouldering.", IsActive: true, CreatedDate: now},
-        {ID: 2, Title: "LeBurger", Description: "Have a meal at LeBurger.", IsActive: true, CreatedDate: now},
-        {ID: 3, Title: "Symphony", Description: "See a show at the Minneapolis Symphony.", IsActive: true, CreatedDate: now},
+	db *sql.DB
 }
 
 func createRouter(handlers Handlers) *gin.Engine {
-        r := gin.Default()
+	r := gin.Default()
 
-        r.GET("/items", handlers.getItems)
-        r.POST("/items", handlers.createItem)
-        r.PUT("/items/:id", handlers.updateItem)
-        r.PATCH("/items/:id", handlers.patchItem)
-        r.DELETE("/items/:id", handlers.deleteItem)
+	r.GET("/items", handlers.getItems)
+	r.POST("/items", handlers.createItem)
+	r.PUT("/items/:id", handlers.putItem)
+	r.PATCH("/items/:id", handlers.patchItem)
+	r.DELETE("/items/:id", handlers.deleteItem)
 
-        return r
+	return r
 }
 
 func main() {
-        h := Handlers{
-                currTime: func() time.Time {
-                        return time.Now().UTC()
-                },
-        } 
-        r := createRouter(h)
-        r.Run()
+
+	db, err := InitDB(os.Getenv("DATABASE_PATH"))
+	if err != nil {
+		panic(err)
+	}
+
+	h := Handlers{
+		db: db,
+	}
+
+	r := createRouter(h)
+	r.Run()
 }
 
 func (h *Handlers) getItems(c *gin.Context) {
-        c.JSON(http.StatusOK, items)
+	items, err := GetItems(h.db)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	c.JSON(http.StatusOK, items)
 }
 
 func (h *Handlers) createItem(c *gin.Context) {
-        var newItem Item
-        if err := c.ShouldBindJSON(&newItem); err != nil {
-                c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-                return
-        }
-        newItem.ID = len(items) + 1
-        newItem.CreatedDate = h.currTime()
-        items = append(items, newItem)
-        c.JSON(http.StatusCreated, newItem)
+	var newItem Item
+	if err := c.ShouldBindJSON(&newItem); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	id, err := InsertItem(h.db, &newItem)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	item, err := GetItem(h.db, id)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	}
+
+	c.JSON(http.StatusCreated, item)
 }
 
-func (h *Handlers) updateItem(c *gin.Context) {
-        idStr := c.Param("id")
-        id, err := strconv.Atoi(idStr)
-        if err != nil {
-                c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
-                return
-        }
+func (h *Handlers) putItem(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
 
-        var updatedItem Item
-        if err := c.ShouldBindJSON(&updatedItem); err != nil {
-                c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-                return
-        }
+	var updatedItem PutItem
+	if err := c.ShouldBindJSON(&updatedItem); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-        for i, item := range items {
-                if item.ID == id {
-                        items[i].Title = updatedItem.Title
-                        items[i].Description = updatedItem.Description
-                        items[i].ModifiedDate = h.currTime()
-                        items[i].IsActive = updatedItem.IsActive
-                        c.JSON(http.StatusOK, items[i])
-                        return
-                }
-        }
-        c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
+	item, err := GetItem(h.db, int64(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No item was found"})
+		return
+	}
+
+	item.CompletedDate = updatedItem.CompletedDate
+	item.Title = updatedItem.Title
+	item.Description = updatedItem.Description
+	item.IsActive = updatedItem.IsActive
+
+	now := CurrentTime()
+
+	item.ModifiedDate = &now
+
+	if err = UpdateItem(h.db, id, item); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, item)
 }
 
 func (h *Handlers) patchItem(c *gin.Context) {
-        idStr := c.Param("id")
-        id, err := strconv.Atoi(idStr)
-        if err != nil {
-                c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
-                return
-        }
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
 
-        
-        var patchData PatchItem
-        if err := c.ShouldBindJSON(&patchData); err != nil {
-                c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format"})
-                return
-        }
+	var patchItem PatchItem
+	if err := c.ShouldBindJSON(&patchItem); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format"})
+		return
+	}
 
-        itemIndex := -1
+	if !patchItem.HasChanges() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No changes detected"})
+		return
+	}
 
-        for i, item := range items {
-                if item.ID == id {
-                        itemIndex = i
-                        break
-                }
-        }
+	item, err := GetItem(h.db, int64(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No item was found"})
+		return
+	}
 
-        if itemIndex == -1 {
-                c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
-                return
-        }
+	if patchItem.Title != nil {
+		item.Title = *patchItem.Title
+	}
 
-        item := &items[itemIndex]
+	if patchItem.Description != nil {
+		item.Description = *patchItem.Description
+	}
 
-        if patchData.Title != nil {
-                item.Title = *patchData.Title
-        }
+	if patchItem.IsActive != nil {
+		item.IsActive = *patchItem.IsActive
+	}
 
-        if patchData.Description != nil {
-                item.Description = *patchData.Description
-        }
+	if patchItem.CompletedDate != nil {
+		item.CompletedDate = patchItem.CompletedDate
+	}
 
-        item.ModifiedDate = h.currTime()
+	now := CurrentTime()
 
-        if patchData.CompletedDate != nil {
-                item.CompletedDate = *patchData.CompletedDate
-        }
+	item.ModifiedDate = &now
 
-        if patchData.IsActive != nil {
-                item.IsActive = *patchData.IsActive
-        }
+	if err = UpdateItem(h.db, id, item); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
 
-        c.JSON(http.StatusOK, item)
+	c.JSON(http.StatusOK, item)
 }
 
 func (h *Handlers) deleteItem(c *gin.Context) {
-        idStr := c.Param("id")
-        id, err := strconv.Atoi(idStr)
-        if err != nil {
-                c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
-                return
-        }
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
 
-        for i, item := range items {
-                if item.ID == id {
-                        items = append(items[:i], items[i+1:]...)
-                        c.JSON(http.StatusOK, gin.H{"message": "Item deleted"})
-                        return
-                }
-        }
-        c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
+	if err = DeleteItem(h.db, id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Item deleted"})
 }

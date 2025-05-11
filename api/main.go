@@ -121,7 +121,13 @@ func createRouter(handlers Handlers) *gin.Engine {
 
 func main() {
 
-	db, err := InitDB(os.Getenv("DATABASE_PATH"))
+	dbPath, isSet := os.LookupEnv("DATABASE_PATH")
+
+	if isSet == false {
+		panic("DATABASE_PATH environment variable is not set.")
+	}
+
+	db, err := InitDB(dbPath)
 	if err != nil {
 		panic(err)
 	}

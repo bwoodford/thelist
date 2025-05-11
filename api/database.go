@@ -72,13 +72,21 @@ func GetItem(db *sql.DB, id int64) (*Item, error) {
 
 // GetItems retrieves all items from the database
 func GetItems(db *sql.DB) ([]Item, error) {
-	rows, err := db.Query("SELECT * FROM items")
+	rows, err := db.Query(`SELECT 
+				id, 
+				title, 
+				description, 
+				created_date, 
+				modified_date, 
+				completed_date, 
+				is_active FROM items`)
+
+	defer rows.Close()
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var items []Item
+	items := []Item{}
 	for rows.Next() {
 		var item Item
 		err := rows.Scan(

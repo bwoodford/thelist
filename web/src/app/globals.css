@@ -24,3 +24,26 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Item list styles */
+.item-list-container {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* Form transition */
+.form-container {
+  transition: max-height 0.3s ease-in-out, opacity 0.3s ease-in-out;
+  overflow: hidden;
+}
+
+.form-container.hidden {
+  max-height: 0;
+  opacity: 0;
+}
+
+.form-container.visible {
+  max-height: 500px;
+  opacity: 1;
+}

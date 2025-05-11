@@ -156,6 +156,8 @@ func (h *Handlers) createItem(c *gin.Context) {
 		return
 	}
 
+	newItem.CreatedDate = CurrentTime()
+
 	id, err := InsertItem(h.db, &newItem)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, "Internal server error")

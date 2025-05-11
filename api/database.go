@@ -79,7 +79,7 @@ func GetItems(db *sql.DB) ([]Item, error) {
 				created_date, 
 				modified_date, 
 				completed_date, 
-				is_active FROM items`)
+				is_active FROM items WHERE is_active=1`)
 
 	defer rows.Close()
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -110,6 +111,10 @@ type Handlers struct {
 func createRouter(handlers Handlers) *gin.Engine {
 	r := gin.Default()
 
+	config := cors.DefaultConfig()
+	config.AllowOrigins = []string{"http://localhost:3000"}
+
+	r.Use(cors.New(config))
 	r.GET("/items", handlers.getItems)
 	r.POST("/items", handlers.createItem)
 	r.PUT("/items/:id", handlers.putItem)
